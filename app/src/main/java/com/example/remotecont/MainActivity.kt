@@ -24,17 +24,76 @@ import java.net.Socket
 
 private const val TAG = "MainActivity"
 internal const val TCP_BUFFER_SIZE = 16 * 1024
+private const val PORT = 9090
 
 class MainActivity : ComponentActivity() {
-
     private var tcpSocket: ServerSocket? = null
-
-    private var communicationSocket: Socket? = null
-
-    lateinit var h264DecoderSync: H264DecoderSync
+    private var h264DecoderAsync: H264DecoderAsync? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        hideNotificationBar()
+        setContentView(R.layout.main)
+        initAsyncDecoder()
+
+        try {
+            this.getFramesServerConnection()
+        } catch (exception: Exception) {
+            Log.e("Main", "Cannot get server conn")
+        }
+
+        Thread{this.feedReceivedFrames()}.start()
+    }
+
+    private fun initAsyncDecoder() {
+        val asyncTextureView = findViewById<TextureView>(R.id.syncTextureView)
+        asyncTextureView.surfaceTextureListener =
+            object : TextureView.SurfaceTextureListener {
+                override fun onSurfaceTextureAvailable(p0: SurfaceTexture, p1: Int, p2: Int) {
+                    h264DecoderAsync = H264DecoderAsync(surfaceTexture = asyncTextureView.surfaceTexture!!)
+                }
+
+                override fun onSurfaceTextureSizeChanged(p0: SurfaceTexture, p1: Int, p2: Int) {}
+
+                override fun onSurfaceTextureDestroyed(p0: SurfaceTexture): Boolean {
+                    return false
+                }
+
+                override fun onSurfaceTextureUpdated(p0: SurfaceTexture) {}
+            }
+    }
+
+    private fun feedReceivedFrames() {
+        while (true) {
+            val communicationSocket = tcpSocket?.accept()?.apply {
+                reuseAddress = true
+                soTimeout = 0
+            }
+
+            val data = ByteArray(TCP_BUFFER_SIZE)
+
+            while (communicationSocket == null) {
+                continue
+            }
+
+            while (communicationSocket.isConnected) {
+                val dataLength = communicationSocket.getInputStream().read(data)
+                if (dataLength == -1) break
+
+                val packageData = data.sliceArray(IntRange(0, dataLength - 1))
+                h264DecoderAsync!!.pushData(packageData)
+            }
+        }
+    }
+
+    private fun getFramesServerConnection() {
+        tcpSocket = ServerSocket(PORT).apply {
+            reuseAddress = true
+            soTimeout = 0
+        }
+    }
+
+    private fun hideNotificationBar() {
         val decorView: View = window.decorView
         val uiOptions = (View.SYSTEM_UI_FLAG_FULLSCREEN
                 or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
@@ -42,74 +101,5 @@ class MainActivity : ComponentActivity() {
         decorView.systemUiVisibility = uiOptions
 
         actionBar?.hide()
-        setContentView(R.layout.main)
-
-        initSyncDecoder()
-
-        try {
-            tcpSocket = ServerSocket(9090).apply {
-                reuseAddress = true
-                soTimeout = 0
-            }
-        } catch (exception: Exception) {
-            println("")
-        }
-
-        Thread {
-            while (true) {
-                communicationSocket = tcpSocket?.accept()?.apply {
-                    reuseAddress = true
-                    soTimeout = 0
-                }
-
-                val data = ByteArray(TCP_BUFFER_SIZE)
-
-                while (communicationSocket != null && communicationSocket!!.isConnected) {
-                    val dataLength = communicationSocket!!.getInputStream().read(data)
-                    if (dataLength == -1) break
-
-                    val packageData = data.sliceArray(IntRange(0, dataLength - 1))
-
-                    if (::h264DecoderSync.isInitialized) {
-                        h264DecoderSync.pushData(packageData)
-                    }
-                }
-            }
-        }.start()
-    }
-
-    private fun initSyncDecoder() {
-        val syncTextureView = findViewById<TextureView>(R.id.syncTextureView)
-        syncTextureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-            override fun onSurfaceTextureAvailable(p0: SurfaceTexture, p1: Int, p2: Int) {
-                if (::h264DecoderSync.isInitialized.not()) {
-                    h264DecoderSync = H264DecoderSync(syncTextureView)
-                    h264DecoderSync.start()
-                }
-            }
-
-            override fun onSurfaceTextureSizeChanged(p0: SurfaceTexture, p1: Int, p2: Int) {}
-
-            override fun onSurfaceTextureDestroyed(p0: SurfaceTexture): Boolean {
-                return false
-            }
-
-            override fun onSurfaceTextureUpdated(p0: SurfaceTexture) {}
-        }
-    }
-
-    private fun localIP(): InetAddress {
-        val networkInterfaces = NetworkInterface.getNetworkInterfaces()
-        while (networkInterfaces.hasMoreElements()) {
-            val networkInterface = networkInterfaces.nextElement()
-            val address = networkInterface.inetAddresses
-            while (address.hasMoreElements()) {
-                val tmpAddress = address.nextElement()
-                if (!tmpAddress.isLoopbackAddress && tmpAddress is Inet4Address) {
-                    return tmpAddress
-                }
-            }
-        }
-        throw IllegalStateException("IP Address not found!")
     }
 }
