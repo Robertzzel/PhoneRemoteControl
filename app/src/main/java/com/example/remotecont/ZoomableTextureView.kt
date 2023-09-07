@@ -23,6 +23,9 @@ class ZoomableTextureView(context: Context, attrs: AttributeSet) : TextureView(c
     private var lastX = 0f
     private var lastY = 0f
 
+    private var downButtons = 0
+    private var multipleTouch = false
+
     private var conn: Socket? = null
     private var buffer: ByteArray
     private var stream: OutputStream? = null
@@ -49,11 +52,25 @@ class ZoomableTextureView(context: Context, attrs: AttributeSet) : TextureView(c
     override fun onTouchEvent(event: MotionEvent): Boolean {
         //scaleGestureDetector.onTouchEvent(event)
 
-        when (event.action) {
+        when (event.action and MotionEvent.ACTION_MASK) {
             MotionEvent.ACTION_DOWN -> {
+                downButtons++
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                downButtons++
+                multipleTouch
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                downButtons--
+            }
+            MotionEvent.ACTION_UP -> {
                 lastX = event.x
                 lastY = event.y
-                buffer += "${(event.x / this.width * 1000).toInt()},${(event.y / this.height * 1000).toInt()};".toByteArray()
+                if(!multipleTouch) {
+                    buffer += "${(event.x / this.width * 1000).toInt()},${(event.y / this.height * 1000).toInt()};".toByteArray()
+                }
+                multipleTouch = false
+                downButtons--
             }
 //            MotionEvent.ACTION_MOVE -> {
 //                val dx = event.x - lastX
@@ -64,6 +81,8 @@ class ZoomableTextureView(context: Context, attrs: AttributeSet) : TextureView(c
 //
 //                lastX = event.x
 //                lastY = event.y
+//
+//                multipleTouch = true
 //            }
         }
         return true
